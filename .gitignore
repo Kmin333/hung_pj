@@ -1,0 +1,5 @@
+node_modules/
+attendx.db
+attendx.db-shm
+attendx.db-wal
+.env

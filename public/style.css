@@ -201,9 +201,35 @@ tr:hover td { background: var(--surface-2); }
 
 .modal { position: fixed; inset: 0; z-index: 20; background: var(--modal-overlay); display: grid; place-items: start center; padding: 28px; overflow-y: auto; }
 .modal-card { width: min(980px, 100%); position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 26px; box-shadow: var(--shadow); }
-#qrBox { width: 264px; min-height: 264px; padding: 12px; background: white; border-radius: 16px; margin: 14px auto; display: grid; place-items: center; }
-#qrBox img, #qrBox canvas { border-radius: 8px; }
-.reader-box { width: min(420px, 100%); margin: 16px auto; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+#qrBox {
+  width: 392px;
+  max-width: 100%;
+  min-height: 392px;
+  padding: 16px;
+  background: white;
+  border-radius: 16px;
+  margin: 14px auto;
+  display: grid;
+  place-items: center;
+}
+
+#qrBox img,
+#qrBox canvas {
+  border-radius: 8px;
+  max-width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+}
+
+.reader-box {
+  width: min(520px, 100%);
+  min-height: 340px;
+  margin: 16px auto;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
 
 .hidden { display: none !important; }
 

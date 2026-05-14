@@ -8,14 +8,7 @@
  */
 
 const express = require('express');
-const { Pool } = require('pg');
-
-const db = new Pool({
-  connectionString: process.env.SUPABASE_DB_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
+const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const path = require('path');
@@ -162,20 +155,13 @@ function logAudit(userId, subjectId, sessionId, action, details) {
 
 function generateQRToken(sessionId, subjectId) {
   const payload = {
-    sid: sessionId,
-    sub: subjectId,
-    iat: Date.now(),
-    n: crypto.randomBytes(5).toString('hex')
+    sessionId,
+    subjectId,
+    created: Date.now(),
+    nonce: crypto.randomBytes(10).toString('hex')
   };
-
   const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
-
-  const signature = crypto
-    .createHmac('sha256', SECRET_KEY)
-    .update(payloadStr)
-    .digest('base64url')
-    .slice(0, 32);
-
+  const signature = crypto.createHmac('sha256', SECRET_KEY).update(payloadStr).digest('hex');
   return `${payloadStr}.${signature}`;
 }
 
@@ -183,29 +169,12 @@ function verifyQRToken(token) {
   try {
     const [payloadStr, signature] = String(token || '').split('.');
     if (!payloadStr || !signature) return null;
-
-    const expectedShort = crypto
-      .createHmac('sha256', SECRET_KEY)
-      .update(payloadStr)
-      .digest('base64url')
-      .slice(0, 32);
-
-    const expectedOldHex = crypto
-      .createHmac('sha256', SECRET_KEY)
-      .update(payloadStr)
-      .digest('hex');
-
-    const ok = signature === expectedShort || signature === expectedOldHex;
-    if (!ok) return null;
-
-    const payload = JSON.parse(Buffer.from(payloadStr, 'base64url').toString('utf8'));
-
-    return {
-      sessionId: payload.sessionId || payload.sid,
-      subjectId: payload.subjectId || payload.sub,
-      created: payload.created || payload.iat,
-      nonce: payload.nonce || payload.n
-    };
+    const expected = crypto.createHmac('sha256', SECRET_KEY).update(payloadStr).digest('hex');
+    const sigBuf = Buffer.from(signature, 'hex');
+    const expBuf = Buffer.from(expected, 'hex');
+    if (sigBuf.length !== expBuf.length) return null;
+    if (!crypto.timingSafeEqual(sigBuf, expBuf)) return null;
+    return JSON.parse(Buffer.from(payloadStr, 'base64url').toString('utf8'));
   } catch {
     return null;
   }
@@ -283,10 +252,7 @@ function requireTeacherSession(req, res, next) {
 
 app.post('/api/login', (req, res) => {
   const { email, password } = req.body;
-  const result = await db.query(
-  'select * from users where email = $1',
-  [email]
-);
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   if (!user || !bcrypt.compareSync(password || '', user.password)) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }

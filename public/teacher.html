@@ -236,9 +236,14 @@ async function openSubject(subjectId) {
     }
 
     function drawQR(text) {
-      const qrBox = document.getElementById('qrBox');
+     const qrBox = document.getElementById('qrBox');
       qrBox.innerHTML = '';
-      new QRCode(qrBox, { text, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.H });
+      new QRCode(qrBox, {
+      text,
+      width: 360,
+      height: 360,
+      correctLevel: QRCode.CorrectLevel.M
+      });
     }
 
     function downloadQR() {

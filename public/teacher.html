@@ -238,7 +238,7 @@ async function openSubject(subjectId) {
     function drawQR(text) {
       const qrBox = document.getElementById('qrBox');
       qrBox.innerHTML = '';
-      new QRCode(qrBox, { text, width: 420, height: 420, correctLevel: QRCode.CorrectLevel.L });
+      new QRCode(qrBox, { text, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.L });
     }
 
     function downloadQR() {

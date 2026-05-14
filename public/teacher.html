@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="color-scheme" content="light dark">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AttendX — Teacher Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span>🎓</span><div><strong>AttendX</strong><small>Teacher</small></div></div>
+      <button class="nav-btn active" data-tab="subjects" onclick="showTab('subjects')">📚 Subjects</button>
+      <button class="nav-btn" data-tab="create" onclick="showTab('create')">➕ Create Subject</button>
+      <button class="nav-btn" data-tab="attendance" onclick="showTab('attendance')">📊 Attendance</button>
+      <button class="nav-btn" data-tab="audit" onclick="showTab('audit')">🔍 Security Audit Log</button>
+      <button class="nav-btn" data-tab="profile" onclick="showTab('profile')">👤 Profile</button>
+      <button class="nav-btn danger-nav" onclick="logout()">🚪 Logout</button>
+    </aside>
+
+    <main class="main-content">
+      <header id="teacherTopbar" class="topbar">
+        <div><h2>Teacher Dashboard</h2><p>Create subjects, generate secure QR sessions, and review attendance.</p></div>
+        <span class="pill">HMAC + GPS Warning + RBAC</span>
+      </header>
+
+      <section id="subjects" class="tab-panel active">
+        <div class="section-title"><h3>📚 My Subjects</h3><p>Open a subject to create a QR session for a specific day.</p></div>
+        <div id="subjectGrid" class="grid"></div>
+      </section>
+
+      <section id="create" class="tab-panel">
+        <div class="card narrow-card">
+          <h3>➕ Create Subject / Section</h3>
+          <label>Subject name</label>
+          <input id="subjectName" type="text" value="DES332 Computer and Network Security" placeholder="e.g. DES332 Computer and Network Security">
+          <label>Section</label>
+          <input id="section" type="text" value="1" placeholder="e.g. 1">
+          <button onclick="createSubject()">Create Subject →</button>
+          <div id="createSubjectMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section id="attendance" class="tab-panel">
+        <div class="section-title"><h3>📊 Attendance by Session</h3><p>Select a subject and session to see every student: checked and not checked.</p></div>
+        <div class="form-row">
+          <select id="attendanceSubject" onchange="loadSessionsForAttendance()"></select>
+          <select id="attendanceSession" onchange="loadAttendance()"></select>
+        </div>
+        <div class="card table-card">
+          <table id="attendanceTable">
+            <tr><th>Student ID</th><th>Name</th><th>Email</th><th>Status</th><th>Submit Time</th><th>Distance</th><th>Warning</th></tr>
+          </table>
+        </div>
+      </section>
+
+      <section id="audit" class="tab-panel">
+        <div class="section-title"><h3>🔍 Security Audit Log</h3><p>Only logs related to this teacher and this teacher’s subjects/sessions are shown.</p></div>
+        <div class="card table-card">
+          <table id="auditTable"><tr><th>Time</th><th>User</th><th>Role</th><th>Subject</th><th>Action</th><th>Details</th></tr></table>
+        </div>
+      </section>
+
+      <section id="profile" class="tab-panel">
+        <div class="card narrow-card profile-card">
+          <h3>👤 My Profile</h3>
+          <div id="profileBox"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="subjectModal" class="modal hidden">
+    <div class="modal-card">
+      <button class="close-btn" onclick="closeSubjectModal()">×</button>
+      <h3 id="modalTitle">Subject</h3>
+      <p id="modalSubtitle"></p>
+
+      <div class="card soft-card">
+        <h4>Create Attendance QR Session</h4>
+        <div class="form-row">
+          <input id="sessionDate" type="date">
+          <input id="startTime" type="time">
+          <input id="endTime" type="time">
+        </div>
+        <div class="form-row">
+          <input id="allowedRadius" type="number" value="100" placeholder="Allowed radius (meters)">
+          <button class="secondary" onclick="useTeacherLocation()">📍 Use My Current Location</button>
+        </div>
+        <div class="form-row">
+          <input id="classroomLat" type="text" placeholder="Latitude" readonly>
+          <input id="classroomLng" type="text" placeholder="Longitude" readonly>
+        </div>
+        <button onclick="createSessionForSubject()">Generate Secure QR Code →</button>
+        <div id="sessionMsg" class="msg"></div>
+      </div>
+
+      <div id="qrCard" class="card soft-card hidden">
+        <h4>📷 Generated QR Code</h4>
+        <p class="muted">This QR contains a signed HMAC token, not plain attendance data.</p>
+        <div id="qrBox"></div>
+        <button class="secondary" onclick="downloadQR()">⬇ Save QR Code PNG</button>
+      </div>
+
+      <div class="card soft-card">
+        <h4>Sessions in this Subject</h4>
+        <table id="sessionTable"><tr><th>Date</th><th>Time</th><th>Radius</th><th>Action</th></tr></table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('token');
+    if (!token) window.location.href = 'index.html';
+
+    let subjects = [];
+    let selectedSubject = null;
+    let lastQR = { token: '', filename: 'AttendX_QR.png' };
+
+    function headers() { return { 'Content-Type': 'application/json', 'Authorization': token }; }
+
+function showTab(tab) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+
+  document.getElementById(tab).classList.add('active');
+
+  const btn = document.querySelector(`[data-tab="${tab}"]`);
+  if (btn) btn.classList.add('active');
+
+  const topbar = document.getElementById('teacherTopbar');
+  if (topbar) {
+    topbar.style.display = tab === 'subjects' ? 'flex' : 'none';
+  }
+
+  if (tab === 'audit') loadAuditLogs();
+  if (tab === 'profile') loadProfile();
+  if (tab === 'attendance') prepareAttendanceSelectors();
+}
+
+    async function loadSubjects() {
+      const res = await fetch('/api/teacher/subjects', { headers: headers() });
+      if (res.status === 401 || res.status === 403) return window.location.href = 'index.html';
+      const data = await res.json();
+      subjects = data.subjects || [];
+      const grid = document.getElementById('subjectGrid');
+      if (subjects.length === 0) {
+        grid.innerHTML = `<div class="empty-card">No subjects yet. Click <strong>Create Subject</strong> first.</div>`;
+        return;
+      }
+      grid.innerHTML = subjects.map(s => `
+        <div class="subject-card">
+          <div class="subject-icon">📘</div>
+          <h3>${escapeHtml(s.subject_name)}</h3>
+          <p>Section ${escapeHtml(s.section)}</p>
+          <small>${s.session_count || 0} session(s)</small>
+          <button onclick="openSubject('${s.id}')">Open Subject →</button>
+        </div>
+      `).join('');
+      prepareAttendanceSelectors();
+    }
+
+    async function createSubject() {
+      const msg = document.getElementById('createSubjectMsg');
+      msg.textContent = 'Creating...';
+      const res = await fetch('/api/teacher/subjects', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ subjectName: document.getElementById('subjectName').value, section: document.getElementById('section').value })
+      });
+      const data = await res.json();
+      msg.textContent = res.ok ? '✅ Subject created successfully.' : `⛔ ${data.error}`;
+      if (res.ok) { await loadSubjects(); showTab('subjects'); }
+    }
+
+async function openSubject(subjectId) {
+  selectedSubject = subjects.find(s => String(s.id) === String(subjectId));
+
+  if (!selectedSubject) {
+    alert('Subject not found. Please refresh the page.');
+    return;
+  }
+
+  document.getElementById('modalTitle').textContent = selectedSubject.subject_name;
+  document.getElementById('modalSubtitle').textContent = `Section ${selectedSubject.section}`;
+  document.getElementById('subjectModal').classList.remove('hidden');
+  document.getElementById('qrCard').classList.add('hidden');
+  setDefaultDateTime();
+  await loadSubjectSessions();
+}
+
+    function closeSubjectModal() { document.getElementById('subjectModal').classList.add('hidden'); }
+
+    function setDefaultDateTime() {
+      const now = new Date();
+      const later = new Date(now.getTime() + 60 * 60 * 1000);
+      document.getElementById('sessionDate').value = now.toISOString().slice(0, 10);
+      document.getElementById('startTime').value = now.toTimeString().slice(0, 5);
+      document.getElementById('endTime').value = later.toTimeString().slice(0, 5);
+    }
+
+    async function useTeacherLocation() {
+      const msg = document.getElementById('sessionMsg');
+      msg.textContent = 'Requesting location permission...';
+      try {
+        const pos = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 }));
+        document.getElementById('classroomLat').value = pos.coords.latitude.toFixed(6);
+        document.getElementById('classroomLng').value = pos.coords.longitude.toFixed(6);
+        msg.textContent = '✅ Classroom reference location captured.';
+      } catch (e) {
+        msg.textContent = '⛔ Location permission is required to save classroom location.';
+      }
+    }
+
+    async function createSessionForSubject() {
+      const body = {
+        sessionDate: document.getElementById('sessionDate').value,
+        startTime: document.getElementById('startTime').value,
+        endTime: document.getElementById('endTime').value,
+        classroomLat: document.getElementById('classroomLat').value,
+        classroomLng: document.getElementById('classroomLng').value,
+        allowedRadius: document.getElementById('allowedRadius').value
+      };
+      const res = await fetch(`/api/teacher/subjects/${selectedSubject.id}/sessions`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+      const data = await res.json();
+      const msg = document.getElementById('sessionMsg');
+      if (!res.ok) { msg.textContent = `⛔ ${data.error}`; return; }
+      msg.textContent = '✅ QR session created.';
+      lastQR.token = data.qrToken;
+      lastQR.filename = `${safeFile(selectedSubject.subject_name)}_Section${safeFile(selectedSubject.section)}_${data.sessionDate}_QR.png`;
+      drawQR(data.qrToken);
+      document.getElementById('qrCard').classList.remove('hidden');
+      await loadSubjectSessions();
+      await loadSubjects();
+    }
+
+    function drawQR(text) {
+      const qrBox = document.getElementById('qrBox');
+      qrBox.innerHTML = '';
+      new QRCode(qrBox, { text, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.H });
+    }
+
+    function downloadQR() {
+      const qrBox = document.getElementById('qrBox');
+      const canvas = qrBox.querySelector('canvas');
+      const img = qrBox.querySelector('img');
+      const link = document.createElement('a');
+      link.download = lastQR.filename;
+      link.href = canvas ? canvas.toDataURL('image/png') : img.src;
+      link.click();
+    }
+
+    async function loadSubjectSessions() {
+      const res = await fetch(`/api/teacher/subjects/${selectedSubject.id}/sessions`, { headers: headers() });
+      const data = await res.json();
+      const table = document.getElementById('sessionTable');
+      table.innerHTML = `<tr><th>Date</th><th>Time</th><th>Radius</th><th>Action</th></tr>`;
+      (data.sessions || []).forEach(s => {
+        table.innerHTML += `<tr><td>${s.session_date}</td><td>${s.start_time} - ${s.end_time}</td><td>${s.allowed_radius}m</td><td><button class="small-btn" onclick="goAttendance('${s.id}')">View</button></td></tr>`;
+      });
+    }
+
+    function goAttendance(sessionId) {
+      closeSubjectModal();
+      showTab('attendance');
+      document.getElementById('attendanceSubject').value = selectedSubject.id;
+      loadSessionsForAttendance(sessionId);
+    }
+
+    async function prepareAttendanceSelectors() {
+      const subjectSelect = document.getElementById('attendanceSubject');
+      if (!subjectSelect) return;
+      subjectSelect.innerHTML = subjects.map(s => `<option value="${s.id}">${escapeHtml(s.subject_name)} - Section ${escapeHtml(s.section)}</option>`).join('');
+      if (subjects.length) await loadSessionsForAttendance();
+    }
+
+    async function loadSessionsForAttendance(preselectSessionId) {
+      const subjectId = document.getElementById('attendanceSubject').value;
+      const sessionSelect = document.getElementById('attendanceSession');
+      if (!subjectId) { sessionSelect.innerHTML = ''; return; }
+      const res = await fetch(`/api/teacher/subjects/${subjectId}/sessions`, { headers: headers() });
+      const data = await res.json();
+      sessionSelect.innerHTML = (data.sessions || []).map(s => `<option value="${s.id}">${s.session_date} | ${s.start_time}-${s.end_time}</option>`).join('');
+      if (preselectSessionId) sessionSelect.value = preselectSessionId;
+      await loadAttendance();
+    }
+
+    async function loadAttendance() {
+      const sessionId = document.getElementById('attendanceSession').value;
+      const table = document.getElementById('attendanceTable');
+      table.innerHTML = `<tr><th>Student ID</th><th>Name</th><th>Email</th><th>Status</th><th>Submit Time</th><th>Distance</th><th>Warning</th></tr>`;
+      if (!sessionId) return;
+      const res = await fetch(`/api/teacher/sessions/${sessionId}/attendance`, { headers: headers() });
+      const data = await res.json();
+      (data.attendance || []).forEach(r => {
+        const badge = r.status === 'Checked' ? 'success' : 'neutral';
+        const warnBadge = r.warning && r.warning !== 'No' ? 'warning' : 'success';
+        table.innerHTML += `<tr>
+          <td>${r.studentId}</td><td>${escapeHtml(r.name)}</td><td>${r.email}</td>
+          <td><span class="badge ${badge}">${r.status}</span></td>
+          <td>${r.submitTime ? new Date(r.submitTime).toLocaleTimeString() : '-'}</td>
+          <td>${r.distanceMeters != null ? Math.round(r.distanceMeters) + 'm' : '-'}</td>
+          <td><span class="badge ${warnBadge}">${escapeHtml(r.warning || 'No')}</span></td>
+        </tr>`;
+      });
+    }
+
+    async function loadAuditLogs() {
+      const res = await fetch('/api/teacher/audit-logs', { headers: headers() });
+      const data = await res.json();
+      const table = document.getElementById('auditTable');
+      table.innerHTML = `<tr><th>Time</th><th>User</th><th>Role</th><th>Subject</th><th>Action</th><th>Details</th></tr>`;
+      (data.logs || []).forEach(l => {
+        table.innerHTML += `<tr><td>${new Date(l.created_at + 'Z').toLocaleString()}</td><td>${escapeHtml(l.user_name || l.user_id)}</td><td>${l.role || '-'}</td><td>${l.subject_name ? `${escapeHtml(l.subject_name)} Sec ${escapeHtml(l.section)}` : '-'}</td><td>${escapeHtml(l.action)}</td><td>${escapeHtml(l.details)}</td></tr>`;
+      });
+    }
+
+    async function loadProfile() {
+      const res = await fetch('/api/teacher/profile', { headers: headers() });
+      const u = await res.json();
+      document.getElementById('profileBox').innerHTML = `
+        <div class="profile-row"><span>Name</span><strong>${escapeHtml(u.name)}</strong></div>
+        <div class="profile-row"><span>Email</span><strong>${escapeHtml(u.email)}</strong></div>
+        <div class="profile-row"><span>Role</span><strong>${escapeHtml(u.role)}</strong></div>`;
+    }
+
+    async function logout() {
+      try { await fetch('/api/logout', { method: 'POST', headers: headers() }); } catch(e) {}
+      localStorage.clear(); window.location.href = 'index.html';
+    }
+
+    function safeFile(s) { return String(s).replace(/[^a-z0-9]+/gi, '').slice(0, 40); }
+    function escapeHtml(s) { return String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+
+    loadSubjects();
+    loadProfile();
+  </script>
+</body>
+</html>

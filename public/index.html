@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="color-scheme" content="light dark">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AttendX — Login</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="login-page">
+  <main class="login-wrap">
+    <section class="login-logo">
+      <div class="logo-mark">🎓</div>
+      <h1>AttendX</h1>
+      <p>Secure QR Attendance Management System</p>
+    </section>
+
+    <section class="card login-card">
+      <h3>Sign In</h3>
+      <div class="creds-hint">
+        <strong>Teacher:</strong> teacher@example.com / teacher123<br>
+        <strong>Student:</strong> 6622701845@g.siit.tu.ac.th / student123<br>
+        <small>Student self-registration is disabled to prevent fake accounts.</small>
+      </div>
+      <input type="email" id="email" placeholder="Email address" autocomplete="username">
+      <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+      <button onclick="login()">Sign In →</button>
+      <div id="errorMsg"></div>
+    </section>
+
+    <p class="login-foot">Protected by HMAC-signed QR tokens, RBAC, GPS warning, and audit logs.</p>
+  </main>
+
+  <script>
+    async function login() {
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const errEl = document.getElementById('errorMsg');
+      errEl.textContent = '';
+
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errEl.textContent = data.error || 'Login failed.';
+        return;
+      }
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('role', data.role);
+      window.location.href = data.role === 'teacher' ? 'teacher.html' : 'student.html';
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+  </script>
+</body>
+</html>

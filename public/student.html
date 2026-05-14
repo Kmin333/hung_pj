@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="color-scheme" content="light dark">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AttendX — Student Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span>🎓</span><div><strong>AttendX</strong><small>Student</small></div></div>
+      <button class="nav-btn active" data-tab="scan" onclick="showTab('scan')">📷 Scan QR Code</button>
+      <button class="nav-btn" data-tab="history" onclick="showTab('history')">📋 My Attendance</button>
+      <button class="nav-btn" data-tab="profile" onclick="showTab('profile')">👤 Profile</button>
+      <button class="nav-btn danger-nav" onclick="logout()">🚪 Logout</button>
+    </aside>
+
+    <main class="main-content">
+      <header id="studentTopbar" class="topbar">
+        <div><h2>Student Dashboard</h2><p>Scan the teacher’s QR code and verify your classroom location.</p></div>
+        <span class="pill">Camera Scan + GPS</span>
+      </header>
+
+      <section id="scan" class="tab-panel active">
+        <div class="card narrow-card">
+          <h3>📷 Scan Attendance QR Code</h3>
+          <p class="muted">Click the button below, allow camera permission, then scan the QR shown by the teacher. The system will also ask for location permission.</p>
+          <button id="startBtn" onclick="startScanner()">Open Camera Scanner →</button>
+          <button id="stopBtn" class="secondary hidden" onclick="stopScanner()">Stop Scanner</button>
+          <div id="reader" class="reader-box hidden"></div>
+          <div id="resultMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section id="history" class="tab-panel">
+        <div class="section-title"><h3>📋 My Attendance</h3><p>Only your own attendance records are shown here.</p></div>
+        <div class="card table-card">
+          <table id="myTable"><tr><th>Subject</th><th>Section</th><th>Date</th><th>Status</th><th>Submit Time</th><th>Warning</th></tr></table>
+          <p id="emptyMsg" class="empty-text hidden">No attendance records yet.</p>
+        </div>
+      </section>
+
+      <section id="profile" class="tab-panel">
+        <div class="card narrow-card profile-card">
+          <h3>👤 My Profile</h3>
+          <div id="profileBox"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('token');
+    if (!token) window.location.href = 'index.html';
+    let scanner = null;
+    let scanning = false;
+
+    function headers() { return { 'Content-Type': 'application/json', 'Authorization': token }; }
+
+    function showTab(tab) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+
+  document.getElementById(tab).classList.add('active');
+
+  const btn = document.querySelector(`[data-tab="${tab}"]`);
+  if (btn) btn.classList.add('active');
+
+  const topbar = document.getElementById('studentTopbar');
+  if (topbar) {
+    topbar.style.display = tab === 'scan' ? 'flex' : 'none';
+  }
+
+  if (tab === 'history') loadMyAttendance();
+  if (tab === 'profile') loadProfile();
+}
+
+    async function startScanner() {
+      const msg = document.getElementById('resultMsg');
+      msg.textContent = '';
+      if (typeof Html5Qrcode === 'undefined') {
+        msg.textContent = '⛔ QR scanner library could not load. Please check your internet connection.';
+        return;
+      }
+      document.getElementById('reader').classList.remove('hidden');
+      document.getElementById('stopBtn').classList.remove('hidden');
+      document.getElementById('startBtn').classList.add('hidden');
+      scanner = new Html5Qrcode('reader');
+      scanning = true;
+      try {
+        await scanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          async decodedText => {
+            if (!scanning) return;
+            scanning = false;
+            await stopScanner(false);
+            await submitAttendance(decodedText);
+          }
+        );
+      } catch (e) {
+        msg.textContent = '⛔ Camera permission is required to scan the QR code.';
+        document.getElementById('reader').classList.add('hidden');
+        document.getElementById('stopBtn').classList.add('hidden');
+        document.getElementById('startBtn').classList.remove('hidden');
+      }
+    }
+
+    async function stopScanner(clearMsg = true) {
+      try {
+        if (scanner) await scanner.stop();
+      } catch (e) {}
+      scanner = null;
+      scanning = false;
+      document.getElementById('reader').classList.add('hidden');
+      document.getElementById('stopBtn').classList.add('hidden');
+      document.getElementById('startBtn').classList.remove('hidden');
+      if (clearMsg) document.getElementById('resultMsg').textContent = 'Scanner stopped.';
+    }
+
+    async function submitAttendance(qrToken) {
+      const msg = document.getElementById('resultMsg');
+      msg.textContent = 'QR scanned. Requesting location permission...';
+      let pos;
+      try {
+        pos = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 }));
+      } catch (e) {
+        msg.textContent = '⛔ Location permission is required for attendance verification.';
+        msg.className = 'msg error';
+        return;
+      }
+
+      msg.textContent = 'Submitting attendance...';
+      const res = await fetch('/api/student/submit-attendance', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ qrToken, latitude: pos.coords.latitude, longitude: pos.coords.longitude })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        msg.className = 'msg error';
+        msg.textContent = `⛔ ${data.message || data.error}`;
+      } else {
+        const warn = data.status.includes('Warning');
+        msg.className = warn ? 'msg warning-box' : 'msg success-box';
+        msg.textContent = `${warn ? '⚠️' : '✅'} ${data.status}: ${data.subjectName} Section ${data.section} (${data.warningMessage})`;
+        loadMyAttendance();
+      }
+    }
+
+    async function loadMyAttendance() {
+      const res = await fetch('/api/student/my-attendance', { headers: headers() });
+      if (res.status === 401 || res.status === 403) return window.location.href = 'index.html';
+      const data = await res.json();
+      const table = document.getElementById('myTable');
+      const empty = document.getElementById('emptyMsg');
+      table.innerHTML = `<tr><th>Subject</th><th>Section</th><th>Date</th><th>Status</th><th>Submit Time</th><th>Warning</th></tr>`;
+      if (!data.records || data.records.length === 0) {
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+      data.records.forEach(r => {
+        const badge = r.status.includes('Warning') ? 'warning' : 'success';
+        table.innerHTML += `<tr>
+          <td>${escapeHtml(r.subject_name)}</td>
+          <td>${escapeHtml(r.section)}</td>
+          <td>${r.session_date}</td>
+          <td><span class="badge ${badge}">${escapeHtml(r.status)}</span></td>
+          <td>${new Date(r.submit_time).toLocaleString()}</td>
+          <td>${escapeHtml(r.warning_message || 'No')}</td>
+        </tr>`;
+      });
+    }
+
+    async function loadProfile() {
+      const res = await fetch('/api/student/profile', { headers: headers() });
+      const u = await res.json();
+      document.getElementById('profileBox').innerHTML = `
+        <div class="profile-row"><span>Name</span><strong>${escapeHtml(u.name)}</strong></div>
+        <div class="profile-row"><span>Student ID</span><strong>${escapeHtml(u.studentId)}</strong></div>
+        <div class="profile-row"><span>Email</span><strong>${escapeHtml(u.email)}</strong></div>
+        <div class="profile-row"><span>Role</span><strong>${escapeHtml(u.role)}</strong></div>`;
+    }
+
+    async function logout() {
+      try { await fetch('/api/logout', { method: 'POST', headers: headers() }); } catch(e) {}
+      localStorage.clear(); window.location.href = 'index.html';
+    }
+
+    function escapeHtml(s) { return String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+
+    loadMyAttendance();
+    loadProfile();
+  </script>
+</body>
+</html>

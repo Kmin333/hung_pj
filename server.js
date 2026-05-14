@@ -474,9 +474,4 @@ app.get('/api/student/dashboard', authenticate, requireRole('student'), (req, re
   res.json({ records });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`\n🎓 AttendX server running → http://localhost:${PORT}`);
-  console.log('🔐 Demo teacher: teacher@example.com / teacher123');
-  console.log('🧑‍🎓 Demo student: 6622701845@g.siit.tu.ac.th / student123\n');
-});
+module.exports = app;

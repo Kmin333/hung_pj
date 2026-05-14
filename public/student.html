@@ -78,36 +78,60 @@
   if (tab === 'profile') loadProfile();
 }
 
-    async function startScanner() {
-      const msg = document.getElementById('resultMsg');
-      msg.textContent = '';
-      if (typeof Html5Qrcode === 'undefined') {
-        msg.textContent = '⛔ QR scanner library could not load. Please check your internet connection.';
-        return;
+   async function startScanner() {
+  const msg = document.getElementById('resultMsg');
+  msg.className = 'msg';
+  msg.textContent = '';
+
+  if (!window.isSecureContext) {
+    msg.className = 'msg error';
+    msg.textContent = '⛔ Camera needs HTTPS. Open the Vercel https:// website, not a normal http:// link.';
+    return;
+  }
+
+  if (typeof Html5Qrcode === 'undefined') {
+    msg.className = 'msg error';
+    msg.textContent = '⛔ QR scanner library could not load. Please check your internet connection.';
+    return;
+  }
+
+  document.getElementById('reader').classList.remove('hidden');
+  document.getElementById('stopBtn').classList.remove('hidden');
+  document.getElementById('startBtn').classList.add('hidden');
+
+  scanner = new Html5Qrcode('reader');
+  scanning = true;
+
+  const scannerConfig = {
+    fps: 15,
+    qrbox: (viewfinderWidth, viewfinderHeight) => {
+      const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+      const size = Math.max(260, Math.floor(minEdge * 0.8));
+      return { width: size, height: size };
+    },
+    aspectRatio: 1.0,
+    disableFlip: false
+  };
+
+  try {
+    await scanner.start(
+      { facingMode: 'environment' },
+      scannerConfig,
+      async decodedText => {
+        if (!scanning) return;
+        scanning = false;
+        await stopScanner(false);
+        await submitAttendance(String(decodedText).trim());
       }
-      document.getElementById('reader').classList.remove('hidden');
-      document.getElementById('stopBtn').classList.remove('hidden');
-      document.getElementById('startBtn').classList.add('hidden');
-      scanner = new Html5Qrcode('reader');
-      scanning = true;
-      try {
-        await scanner.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          async decodedText => {
-            if (!scanning) return;
-            scanning = false;
-            await stopScanner(false);
-            await submitAttendance(decodedText);
-          }
-        );
-      } catch (e) {
-        msg.textContent = '⛔ Camera permission is required to scan the QR code.';
-        document.getElementById('reader').classList.add('hidden');
-        document.getElementById('stopBtn').classList.add('hidden');
-        document.getElementById('startBtn').classList.remove('hidden');
-      }
-    }
+    );
+  } catch (e) {
+    msg.className = 'msg error';
+    msg.textContent = '⛔ Cannot open camera. Please allow camera permission, close other camera apps, and try again.';
+    document.getElementById('reader').classList.add('hidden');
+    document.getElementById('stopBtn').classList.add('hidden');
+    document.getElementById('startBtn').classList.remove('hidden');
+  }
+}
 
     async function stopScanner(clearMsg = true) {
       try {

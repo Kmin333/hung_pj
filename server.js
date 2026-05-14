@@ -402,13 +402,35 @@ app.post('/api/student/submit-attendance', authenticate, requireRole('student'),
   `).get(payload.sessionId, payload.subjectId);
   if (!session) return res.status(400).json({ status: 'Rejected', message: 'Session not found.' });
 
-  const now = new Date();
-  const start = new Date(`${session.session_date}T${session.start_time}`);
-  const end = new Date(`${session.session_date}T${session.end_time}`);
-  if (now < start || now > end) {
-    logAudit(req.user.id, session.subject_id, session.id, 'Submit Attendance Rejected', 'Attendance session is closed or expired');
-    return res.status(400).json({ status: 'Rejected', message: 'Attendance session is not open now.' });
-  }
+    // Convert current server time to Thailand time (UTC+7)
+    const now = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "Asia/Bangkok" })
+    );
+    
+    // Session start/end time
+    const start = new Date(`${session.session_date} ${session.start_time}:00`);
+    const end = new Date(`${session.session_date} ${session.end_time}:00`);
+    
+    // Debug logs (optional but useful)
+    console.log('NOW:', now);
+    console.log('START:', start);
+    console.log('END:', end);
+    
+    // Check if attendance session is currently open
+    if (now < start || now > end) {
+      logAudit(
+        req.user.id,
+        session.subject_id,
+        session.id,
+        'Submit Attendance Rejected',
+        'Attendance session is closed or expired'
+      );
+    
+      return res.status(400).json({
+        status: 'Rejected',
+        message: 'Attendance session is not open now.'
+      });
+    }
 
   const duplicate = db.prepare('SELECT id FROM attendance_records WHERE session_id = ? AND student_id = ?').get(session.id, req.user.id);
   if (duplicate) {

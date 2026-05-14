@@ -138,17 +138,23 @@
         method: 'POST', headers: headers(),
         body: JSON.stringify({ qrToken, latitude: pos.coords.latitude, longitude: pos.coords.longitude })
       });
-      const data = await res.json();
-      if (!res.ok) {
-        msg.className = 'msg error';
-        msg.textContent = `⛔ ${data.message || data.error}`;
-      } else {
-        const warn = data.status.includes('Warning');
-        msg.className = warn ? 'msg warning-box' : 'msg success-box';
-        msg.textContent = `${warn ? '⚠️' : '✅'} ${data.status}: ${data.subjectName} Section ${data.section} (${data.warningMessage})`;
-        loadMyAttendance();
-      }
-    }
+const data = await res.json();
+
+        if (!res.ok) {
+          msg.className = 'msg error';
+          msg.textContent = `⛔ ${data.message || data.error}`;
+        } else {
+          const warn = data.status.includes('Warning');
+          msg.className = warn ? 'msg warning-box' : 'msg success-box';
+          if (data.warningMessage && data.warningMessage !== 'No') {
+            msg.textContent =
+              `${warn ? '⚠️' : '✅'} ${data.status}: ${data.subjectName} Section ${data.section} (${data.warningMessage})`;
+          } else {
+            msg.textContent =
+              `${warn ? '⚠️' : '✅'} ${data.status}: ${data.subjectName} Section ${data.section}`;
+          }
+          loadMyAttendance();
+        }
 
     async function loadMyAttendance() {
       const res = await fetch('/api/student/my-attendance', { headers: headers() });

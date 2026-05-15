@@ -78,36 +78,86 @@
   if (tab === 'profile') loadProfile();
 }
 
-    async function startScanner() {
-      const msg = document.getElementById('resultMsg');
-      msg.textContent = '';
-      if (typeof Html5Qrcode === 'undefined') {
-        msg.textContent = '⛔ QR scanner library could not load. Please check your internet connection.';
-        return;
-      }
-      document.getElementById('reader').classList.remove('hidden');
-      document.getElementById('stopBtn').classList.remove('hidden');
-      document.getElementById('startBtn').classList.add('hidden');
-      scanner = new Html5Qrcode('reader');
-      scanning = true;
-      try {
-        await scanner.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          async decodedText => {
-            if (!scanning) return;
-            scanning = false;
-            await stopScanner(false);
-            await submitAttendance(decodedText);
-          }
-        );
-      } catch (e) {
-        msg.textContent = '⛔ Camera permission is required to scan the QR code.';
-        document.getElementById('reader').classList.add('hidden');
-        document.getElementById('stopBtn').classList.add('hidden');
-        document.getElementById('startBtn').classList.remove('hidden');
-      }
+  async function startScanner() {
+    const msg = document.getElementById('resultMsg');
+    msg.textContent = '';
+    msg.className = 'msg';
+  
+    // Check QR library
+    if (typeof Html5Qrcode === 'undefined') {
+      msg.textContent =
+        '⛔ QR scanner library could not load.';
+      return;
     }
+  
+    // STEP 1 — Request location permission FIRST
+    try {
+      await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(
+          resolve,
+          reject,
+          {
+            enableHighAccuracy: true,
+            timeout: 10000
+          }
+        )
+      );
+    } catch (e) {
+      msg.textContent =
+        '⛔ Location permission is required before scanning attendance.';
+      msg.className = 'msg error';
+      return;
+    }
+  
+    // STEP 2 — Open camera only if location allowed
+    document.getElementById('reader')
+      .classList.remove('hidden');
+  
+    document.getElementById('stopBtn')
+      .classList.remove('hidden');
+  
+    document.getElementById('startBtn')
+      .classList.add('hidden');
+  
+    scanner = new Html5Qrcode('reader');
+    scanning = true;
+  
+    try {
+      await scanner.start(
+        { facingMode: 'environment' },
+        {
+          fps: 10,
+          qrbox: {
+            width: 250,
+            height: 250
+          }
+        },
+        async decodedText => {
+          if (!scanning) return;
+  
+          scanning = false;
+  
+          await stopScanner(false);
+  
+          await submitAttendance(decodedText);
+        }
+      );
+    } catch (e) {
+      msg.textContent =
+        '⛔ Camera permission is required to scan the QR code.';
+  
+      msg.className = 'msg error';
+  
+      document.getElementById('reader')
+        .classList.add('hidden');
+  
+      document.getElementById('stopBtn')
+        .classList.add('hidden');
+  
+      document.getElementById('startBtn')
+        .classList.remove('hidden');
+    }
+  }
 
     async function stopScanner(clearMsg = true) {
       try {

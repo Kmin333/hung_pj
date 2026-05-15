@@ -112,7 +112,7 @@ db.exec(`
 db.pragma(`user_version = ${SCHEMA_VERSION}`);
 
 const SECRET_KEY = process.env.HMAC_SECRET || 'SUPER_SECRET_KEY_PROTOTYPE_CHANGE_ME';
-const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
 
 function id(prefix) {
   return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -250,16 +250,36 @@ function requireTeacherSession(req, res, next) {
   next();
 }
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
+
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-  if (!user || !bcrypt.compareSync(password || '', user.password)) {
+
+  if (!user) {
+    logAudit(null, null, null, 'Failed Login', `Failed login attempt for email: ${email}`);
     return res.status(401).json({ error: 'Invalid credentials' });
   }
+
+  const ok = await bcrypt.compare(password || '', user.password);
+
+  if (!ok) {
+    logAudit(user.id, null, null, 'Failed Login', `Wrong password attempt for email: ${email}`);
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
   const token = crypto.randomBytes(24).toString('hex');
-  db.prepare('INSERT INTO auth_tokens (token, user_id, created_at) VALUES (?, ?, ?)').run(token, user.id, Date.now());
+
+  db.prepare('INSERT INTO auth_tokens (token, user_id, created_at) VALUES (?, ?, ?)')
+    .run(token, user.id, Date.now());
+
   logAudit(user.id, null, null, 'Login', `${user.name} logged in as ${user.role}`);
-  res.json({ token, role: user.role, name: user.name, user: publicUser(user) });
+
+  res.json({
+    token,
+    role: user.role,
+    name: user.name,
+    user: publicUser(user)
+  });
 });
 
 app.post('/api/logout', authenticate, (req, res) => {
@@ -448,9 +468,9 @@ app.post('/api/student/submit-attendance', authenticate, requireRole('student'),
   let status = 'Checked';
   let warning = 'No';
   if (distance > session.allowed_radius) {
-    status = 'Checked with Warning';
+    status = 'Pending Review';
     warning = `Far location (${Math.round(distance)}m away)`;
-    logAudit(req.user.id, session.subject_id, session.id, 'Far Location Warning', `${req.user.name} checked in ${Math.round(distance)}m away`);
+    logAudit(req.user.id, session.subject_id, session.id, 'Far Location Warning', `${req.user.name} checked in ${Math.round(distance)}m away. Teacher review required.`);
   } else {
     logAudit(req.user.id, session.subject_id, session.id, 'Submit Attendance', `${req.user.name} checked in successfully`);
   }

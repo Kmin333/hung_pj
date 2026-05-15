@@ -2,6 +2,9 @@
  * AttendX — Secure QR Attendance System
  * Backend: Node.js + Express + SQLite (better-sqlite3)
  *
+ * Run:
+ *   npm install
+ *   npm start
  */
   require('dotenv').config();
   const express = require('express');
@@ -150,11 +153,14 @@ if (!SECRET_KEY || SECRET_KEY.length < 32) {
 
 const TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
+  windowMs: 5 * 60 * 1000,
+  max: 5,
+  statusCode: 429,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many login attempts. Please try again later.' }
+  message: {
+    error: 'Too many login attempts. Please try again later.'
+  }
 });
 
 function id(prefix) {

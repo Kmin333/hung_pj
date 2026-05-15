@@ -2,18 +2,48 @@
  * AttendX — Secure QR Attendance System
  * Backend: Node.js + Express + SQLite (better-sqlite3)
  *
- * Run:
- *   npm install
- *   npm start
  */
+  require('dotenv').config();
+  const express = require('express');
+  const Database = require('better-sqlite3');
+  const bcrypt = require('bcryptjs');
+  const crypto = require('crypto');
+  const path = require('path');
+  const helmet = require('helmet');
+  const rateLimit = require('express-rate-limit');
+  const app = express();
 
-const express = require('express');
-const Database = require('better-sqlite3');
-const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
-const path = require('path');
+app.set('trust proxy', 1);
 
-const app = express();
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: [
+        "'self'",
+        "'unsafe-inline'",
+        "https://unpkg.com",
+        "https://cdnjs.cloudflare.com"
+      ],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      styleSrcElem: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:"],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      frameAncestors: ["'none'"]
+    }
+  },
+  referrerPolicy: { policy: 'no-referrer' }
+}));
+
+app.use((req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(self), geolocation=(self)');
+  next();
+});
+
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -111,8 +141,21 @@ db.exec(`
 
 db.pragma(`user_version = ${SCHEMA_VERSION}`);
 
-const SECRET_KEY = process.env.HMAC_SECRET || 'SUPER_SECRET_KEY_PROTOTYPE_CHANGE_ME';
+const SECRET_KEY = process.env.HMAC_SECRET;
+
+if (!SECRET_KEY || SECRET_KEY.length < 32) {
+  console.error('❌ Missing or weak HMAC_SECRET. Set a strong HMAC_SECRET in Render Environment Variables.');
+  process.exit(1);
+}
+
 const TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please try again later.' }
+});
 
 function id(prefix) {
   return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -128,12 +171,12 @@ function seedUsers() {
   `);
 
   const users = [
-    ['u_teacher', 'Professor Minerva McGonagall', null, 'teacher@example.com', 'teacher123', 'teacher'],
-    ['u_harry', 'Harry Potter', '6622701845', '6622701845@g.siit.tu.ac.th', 'student123', 'student'],
-    ['u_hermione', 'Hermione Granger', '6622703928', '6622703928@g.siit.tu.ac.th', 'student123', 'student'],
-    ['u_ron', 'Ron Weasley', '6622707461', '6622707461@g.siit.tu.ac.th', 'student123', 'student'],
-    ['u_draco', 'Draco Malfoy', '6622705139', '6622705139@g.siit.tu.ac.th', 'student123', 'student'],
-    ['u_luna', 'Luna Lovegood', '6622708256', '6622708256@g.siit.tu.ac.th', 'student123', 'student']
+  ['u_teacher', 'Professor Minerva McGonagall', null, 'teacher@example.com', process.env.SEED_TEACHER_PASSWORD, 'teacher'],
+  ['u_harry', 'Harry Potter', '6622701845', '6622701845@g.siit.tu.ac.th', process.env.SEED_STUDENT_PASSWORD, 'student'],
+  ['u_hermione', 'Hermione Granger', '6622703928', '6622703928@g.siit.tu.ac.th', process.env.SEED_STUDENT_PASSWORD, 'student'],
+  ['u_ron', 'Ron Weasley', '6622707461', '6622707461@g.siit.tu.ac.th', process.env.SEED_STUDENT_PASSWORD, 'student'],
+  ['u_draco', 'Draco Malfoy', '6622705139', '6622705139@g.siit.tu.ac.th', process.env.SEED_STUDENT_PASSWORD, 'student'],
+  ['u_luna', 'Luna Lovegood', '6622708256', '6622708256@g.siit.tu.ac.th', process.env.SEED_STUDENT_PASSWORD, 'student']
   ];
 
   const seed = db.transaction(() => {
@@ -250,7 +293,7 @@ function requireTeacherSession(req, res, next) {
   next();
 }
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
 
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
@@ -311,9 +354,25 @@ app.get('/api/teacher/subjects', authenticate, requireRole('teacher'), (req, res
 app.post('/api/teacher/subjects', authenticate, requireRole('teacher'), (req, res) => {
   const subjectName = String(req.body.subjectName || '').trim();
   const section = String(req.body.section || '').trim();
-  if (!subjectName || !section) return res.status(400).json({ error: 'Subject name and section are required.' });
+
+  if (!subjectName || !section) {
+    return res.status(400).json({ error: 'Subject name and section are required.' });
+  }
+
+  if (subjectName.length > 80 || section.length > 30) {
+    return res.status(400).json({ error: 'Subject name or section is too long.' });
+  }
+
+  if (!/^[a-zA-Z0-9\s\-_.()&]+$/.test(subjectName)) {
+    return res.status(400).json({ error: 'Subject name contains invalid characters.' });
+  }
+
+  if (!/^[a-zA-Z0-9\s\-_.()]+$/.test(section)) {
+    return res.status(400).json({ error: 'Section contains invalid characters.' });
+  }
 
   const subjectId = id('subj');
+
   try {
     db.prepare(`
       INSERT INTO subjects (id, teacher_id, subject_name, section)
@@ -347,6 +406,22 @@ app.post('/api/teacher/subjects/:subjectId/sessions', authenticate, requireRole(
   const radius = parseInt(allowedRadius, 10);
   if (!Number.isFinite(radius) || radius <= 0) return res.status(400).json({ error: 'Allowed radius must be a positive number.' });
 
+  const classLat = parseFloat(classroomLat);
+  const classLng = parseFloat(classroomLng);
+
+    if (!Number.isFinite(classLat) || !Number.isFinite(classLng)) {
+     return res.status(400).json({ error: 'Classroom location must be valid numbers.' });
+  }
+
+if (classLat < -90 || classLat > 90 || classLng < -180 || classLng > 180) {
+  return res.status(400).json({ error: 'Classroom location coordinates are invalid.' });
+}
+
+if (radius > 1000) {
+  return res.status(400).json({ error: 'Allowed radius is too large.' });
+}
+
+
   const sessionId = id('sess');
   const qrToken = generateQRToken(sessionId, req.subject.id);
   db.prepare(`
@@ -355,7 +430,7 @@ app.post('/api/teacher/subjects/:subjectId/sessions', authenticate, requireRole(
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     sessionId, req.subject.id, req.user.id, sessionDate, startTime, endTime, qrToken,
-    parseFloat(classroomLat), parseFloat(classroomLng), radius
+    classLat, classLng, radius
   );
   logAudit(req.user.id, req.subject.id, sessionId, 'Create QR Session', `Created QR session for ${req.subject.subject_name} Section ${req.subject.section} on ${sessionDate}`);
   res.status(201).json({ id: sessionId, subjectId: req.subject.id, qrToken, sessionDate, startTime, endTime });
@@ -382,7 +457,7 @@ app.get('/api/teacher/sessions/:sessionId/attendance', authenticate, requireRole
     studentId: r.student_id,
     name: r.name,
     email: r.email,
-    status: r.submit_time ? 'Checked' : 'Not Checked',
+    status: r.submit_time ? r.status : 'Not Checked',
     submitTime: r.submit_time,
     distanceMeters: r.distance_meters,
     warning: r.warning_message || 'No'
@@ -458,22 +533,42 @@ app.post('/api/student/submit-attendance', authenticate, requireRole('student'),
     return res.status(400).json({ status: 'Rejected', message: 'You already checked attendance for this session.' });
   }
 
-  const lat = parseFloat(latitude);
-  const lng = parseFloat(longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return res.status(400).json({ status: 'Rejected', message: 'Location permission is required for attendance verification.' });
-  }
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({
+       status: 'Rejected',
+        message: 'Location permission is required for attendance verification.'
+    });
+    }
+
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        logAudit(req.user.id, session.subject_id, session.id, 'Submit Attendance Rejected', 'Invalid GPS coordinates');
+          return res.status(400).json({
+          status: 'Rejected',
+          message: 'Invalid location coordinates.'
+      });
+    }
+
+
 
   const distance = getDistance(session.classroom_lat, session.classroom_lng, lat, lng);
   let status = 'Checked';
   let warning = 'No';
-  if (distance > session.allowed_radius) {
-    status = 'Pending Review';
-    warning = `Far location (${Math.round(distance)}m away)`;
-    logAudit(req.user.id, session.subject_id, session.id, 'Far Location Warning', `${req.user.name} checked in ${Math.round(distance)}m away. Teacher review required.`);
-  } else {
-    logAudit(req.user.id, session.subject_id, session.id, 'Submit Attendance', `${req.user.name} checked in successfully`);
-  }
+if (distance > session.allowed_radius) {
+  status = 'Pending Review';
+  warning = `Far location (${Math.round(distance)}m from classroom). Teacher review required.`;
+  logAudit(
+    req.user.id,
+    session.subject_id,
+    session.id,
+    'Far Location Pending Review',
+    `${req.user.name} checked in ${Math.round(distance)}m from classroom. Teacher review required.`
+  );
+} else {
+  logAudit(req.user.id, session.subject_id, session.id, 'Submit Attendance', `${req.user.name} checked in successfully`);
+}
 
   const recordId = id('rec');
   db.prepare(`
@@ -519,6 +614,5 @@ app.get('/api/student/dashboard', authenticate, requireRole('student'), (req, re
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n🎓 AttendX server running → http://localhost:${PORT}`);
-  console.log('🔐 Demo teacher: teacher@example.com / teacher123');
-  console.log('🧑‍🎓 Demo student: 6622701845@g.siit.tu.ac.th / student123\n');
+  console.log('🔐 Server ready. Use configured credentials to log in.');
 });

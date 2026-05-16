@@ -563,14 +563,14 @@ app.post('/api/student/submit-attendance', authenticate, requireRole('student'),
   let status = 'Checked';
   let warning = 'No';
 if (distance > session.allowed_radius) {
-  status = 'Pending Review';
+  status = 'Checked with Warning';
   warning = `Far location (${Math.round(distance)}m from classroom). Teacher review required.`;
   logAudit(
     req.user.id,
     session.subject_id,
     session.id,
-    'Far Location Pending Review',
-    `${req.user.name} checked in ${Math.round(distance)}m from classroom. Teacher review required.`
+    'Far Location',
+    `${req.user.name} checked in ${Math.round(distance)}m from classroom.`
   );
 } else {
   logAudit(req.user.id, session.subject_id, session.id, 'Submit Attendance', `${req.user.name} checked in successfully`);
